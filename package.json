@@ -5,13 +5,20 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "deploy": "rimraf ./build && tsc && cp ./build/index.js ~/git/smfdev/web/data/Themes/default/scripts/compose-extras.js"
+    "build": "rimraf ./build && webpack --mode=development && cp ./node_modules/awesome-notifications/dist/style.css ./build/awesome-notifications.css",
+    "devdeploy": "npm run build && cp ./build/bundle.js ~/git/smfdev/web/data/Themes/default/scripts/compose-extras.js && cp ./build/awesome-notifications.css ~/git/smfdev/web/data/Themes/default/css/awesome-notifications.css"
   },
   "author": "viviridian",
   "license": "UNLICENSED",
   "devDependencies": {
     "@types/node": "^14.0.25",
     "rimraf": "^3.0.2",
-    "typescript": "^3.9.7"
+    "ts-loader": "^8.0.1",
+    "typescript": "^3.9.7",
+    "webpack": "^4.43.0",
+    "webpack-cli": "^3.3.12"
+  },
+  "dependencies": {
+    "awesome-notifications": "^3.1.1"
   }
 }
