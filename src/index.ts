@@ -23,8 +23,6 @@ document.addEventListener('paste', async (e: any) => {
     }
 
     if (e.clipboardData.types.includes("Files")){ // Does the clipboard being pasted contain files?
-        console.log("it's an imageeee");
-
         for (let i = 0; i < e.clipboardData.items.length; i++){
             let transferItem = e.clipboardData.items[i];
             let file = e.clipboardData.files[i];
@@ -42,14 +40,12 @@ document.addEventListener('paste', async (e: any) => {
                         credentials: 'same-origin',
                         body: form
                     });
-                console.log(response);
                 let responseData = await response.json();
                 if (!responseData.ok){
                     notifier.alert(`Failed to upload your image: ${responseData.error}.`);
                     return;
                 }
 
-                console.log(responseData);
                 let textArea = document.getElementById("message") as HTMLTextAreaElement;
                 typeInTextarea(responseData.insert_text, textArea);
                 notifier.success("Successfully attached image.");
@@ -57,13 +53,5 @@ document.addEventListener('paste', async (e: any) => {
 
             await notifier.asyncBlock(uploadPromise(), null, null, "Uploading image...", {'minDurations': {'async-block': 100}});
         }
-    }
-    try {
-        let text = await navigator.clipboard.readText();
-        e.preventDefault();
-        text = text.toUpperCase();
-        console.log('Pasted UPPERCASE text: ', text);
-    } catch (err) {
-        console.error('Failed to read clipboard contents: ', err);
     }
 });
