@@ -1,0 +1,478 @@
+diff --git a/Sources/Display.php b/Sources/Display.php
+index 1aeda99..b2415b9 100755
+--- a/Sources/Display.php
++++ b/Sources/Display.php
+@@ -1225,21 +1225,38 @@ function Download()
+ 	if (!isset($_REQUEST['attach']) && !isset($_REQUEST['id']))
+ 		fatal_lang_error('no_access', false);
+ 
+-	$_REQUEST['attach'] = isset($_REQUEST['attach']) ? (int) $_REQUEST['attach'] : (int) $_REQUEST['id'];
+-
+-	if (isset($_REQUEST['type']) && $_REQUEST['type'] == 'avatar')
++	if (isset($_REQUEST['type']))
+ 	{
+-		$request = $smcFunc['db_query']('', '
+-			SELECT id_folder, filename, file_hash, fileext, id_attach, attachment_type, mime_type, approved, id_member
+-			FROM {db_prefix}attachments
+-			WHERE id_attach = {int:id_attach}
+-				AND id_member > {int:blank_id_member}
+-			LIMIT 1',
+-			array(
+-				'id_attach' => $_REQUEST['attach'],
+-				'blank_id_member' => 0,
+-			)
+-		);
++		if ($_REQUEST['type'] == 'avatar')
++		{
++			$request = $smcFunc['db_query']('', '
++				SELECT id_folder, filename, file_hash, fileext, id_attach, attachment_type, mime_type, approved, id_member
++				FROM {db_prefix}attachments
++				WHERE id_attach = {int:id_attach}
++					AND id_member > {int:blank_id_member}
++				LIMIT 1',
++				array(
++					'id_attach' => $_REQUEST['attach'],
++					'blank_id_member' => 0,
++				)
++			);
++		}
++		elseif ($_REQUEST['type'] == 'inline' && isset($_REQUEST['hash'])) // Inline attachments require passing the file hash, so you can't get them just by guessing ids
++		{
++			$request = $smcFunc['db_query']('', '
++				SELECT id_folder, filename, file_hash, fileext, id_attach, attachment_type, mime_type, approved, id_member
++				FROM {db_prefix}attachments
++				WHERE id_attach = {int:id_attach}
++					AND file_hash = {string:hash}
++					AND attachment_type = {int:inline_attachment_type}
++				LIMIT 1',
++				array(
++					'id_attach' => $_REQUEST['attach'],
++					'hash' => $_REQUEST['hash'],
++					'inline_attachment_type' => 4,
++				)
++			);
++		}
+ 		$_REQUEST['image'] = true;
+ 	}
+ 	// This is just a regular attachment...
+@@ -1724,4 +1741,4 @@ function QuickInTopicModeration()
+ 	redirectexit(!empty($topicGone) ? 'board=' . $board : 'topic=' . $topic . '.' . $_REQUEST['start']);
+ }
+ 
+-?>
+\ No newline at end of file
++?>
+diff --git a/Sources/Load.php b/Sources/Load.php
+index fb9a15b..6527d23 100755
+--- a/Sources/Load.php
++++ b/Sources/Load.php
+@@ -382,11 +382,12 @@ function loadUserSettings()
+ 			$request = $smcFunc['db_query']('', '
+ 				SELECT mem.*, IFNULL(a.id_attach, 0) AS id_attach, a.filename, a.attachment_type
+ 				FROM {db_prefix}members AS mem
+-					LEFT JOIN {db_prefix}attachments AS a ON (a.id_member = {int:id_member})
++					LEFT JOIN {db_prefix}attachments AS a ON (a.id_member = {int:id_member} AND a.attachment_type != {int:inline_attachment_type})
+ 				WHERE mem.id_member = {int:id_member}
+ 				LIMIT 1',
+ 				array(
+ 					'id_member' => $id_member,
++                    'inline_attachment_type' => 4,
+ 				)
+ 			);
+ 			$user_settings = $smcFunc['db_fetch_assoc']($request);
+@@ -995,7 +996,7 @@ function loadMemberData($users, $is_name = false, $set = 'normal')
+ 			mem.usertitle' : '');
+ 		$select_tables = '
+ 			LEFT JOIN {db_prefix}log_online AS lo ON (lo.id_member = mem.id_member)
+-			LEFT JOIN {db_prefix}attachments AS a ON (a.id_member = mem.id_member)
++			LEFT JOIN {db_prefix}attachments AS a ON (a.id_member = mem.id_member && a.attachment_type != 4)
+ 			LEFT JOIN {db_prefix}membergroups AS pg ON (pg.id_group = mem.id_post_group)
+ 			LEFT JOIN {db_prefix}membergroups AS mg ON (mg.id_group = mem.id_group)';
+ 	}
+@@ -1015,7 +1016,7 @@ function loadMemberData($users, $is_name = false, $set = 'normal')
+ 			CASE WHEN mem.id_group = 0 OR mg.stars = {string:blank_string} THEN pg.stars ELSE mg.stars END AS stars, mem.password_salt, mem.pm_prefs';
+ 		$select_tables = '
+ 			LEFT JOIN {db_prefix}log_online AS lo ON (lo.id_member = mem.id_member)
+-			LEFT JOIN {db_prefix}attachments AS a ON (a.id_member = mem.id_member)
++			LEFT JOIN {db_prefix}attachments AS a ON (a.id_member = mem.id_member && a.attachment_type != 4)
+ 			LEFT JOIN {db_prefix}membergroups AS pg ON (pg.id_group = mem.id_post_group)
+ 			LEFT JOIN {db_prefix}membergroups AS mg ON (mg.id_group = mem.id_group)';
+ 	}
+@@ -2876,4 +2877,4 @@ function get_auth_secret()
+ 	return $auth_secret;
+ }
+ 
+-?>
+\ No newline at end of file
++?>
+diff --git a/Sources/ManageAttachments.php b/Sources/ManageAttachments.php
+index 227afee..d49482b 100755
+--- a/Sources/ManageAttachments.php
++++ b/Sources/ManageAttachments.php
+@@ -299,16 +299,16 @@ function BrowseFiles()
+ 	$context['sub_template'] = 'browse';
+ 
+ 	// Attachments or avatars?
+-	$context['browse_type'] = isset($_REQUEST['avatars']) ? 'avatars' : (isset($_REQUEST['thumbs']) ? 'thumbs' : 'attachments');
++	$context['browse_type'] = isset($_REQUEST['avatars']) ? 'avatars' : (isset($_REQUEST['thumbs']) ? 'thumbs' : (isset($_REQUEST['inline']) ? 'inline' : 'attachments'));
+ 
+ 	// Set the options for the list component.
+ 	$listOptions = array(
+ 		'id' => 'file_list',
+-		'title' => $txt['attachment_manager_' . ($context['browse_type'] === 'avatars' ? 'avatars' : ( $context['browse_type'] === 'thumbs' ? 'thumbs' : 'attachments'))],
++		'title' => $txt['attachment_manager_' . ($context['browse_type'] === 'avatars' ? 'avatars' : ( $context['browse_type'] === 'thumbs' ? 'thumbs' : ( $context['browse_type'] === 'inline' ? 'inline' : 'attachments')))],
+ 		'items_per_page' => $modSettings['defaultMaxMessages'],
+-		'base_href' => $scripturl . '?action=admin;area=manageattachments;sa=browse' . ($context['browse_type'] === 'avatars' ? ';avatars' : ($context['browse_type'] === 'thumbs' ? ';thumbs' : '')),
++		'base_href' => $scripturl . '?action=admin;area=manageattachments;sa=browse' . ($context['browse_type'] === 'avatars' ? ';avatars' : ($context['browse_type'] === 'thumbs' ? ';thumbs' : ( $context['browse_type'] === 'inline' ? ';inline' :''))),
+ 		'default_sort_col' => 'name',
+-		'no_items_label' => $txt['attachment_manager_' . ($context['browse_type'] === 'avatars' ? 'avatars' : ( $context['browse_type'] === 'thumbs' ? 'thumbs' : 'attachments')) . '_no_entries'],
++		'no_items_label' => $txt['attachment_manager_' . ($context['browse_type'] === 'avatars' ? 'avatars' : ( $context['browse_type'] === 'thumbs' ? 'thumbs' : ( $context['browse_type'] === 'inline' ? 'attachments' : 'attachments'))) . '_no_entries'],
+ 		'get_items' => array(
+ 			'function' => 'list_getFiles',
+ 			'params' => array(
+@@ -344,6 +344,10 @@ function BrowseFiles()
+ 						else
+ 							$link .= sprintf(\'%1$s?action=dlattach;topic=%2$d.0;attach=%3$d\', $scripturl, $rowData[\'id_topic\'], $rowData[\'id_attach\']);
+ 
++                        // For inline links, include the file hash. It\'s required!
++                        if ($rowData[\'attachment_type\'] == 4)
++                            $link .= \';type=inline;hash=\' . $rowData[\'file_hash\'];
++
+ 						$link .= \'"\';
+ 
+ 						// Show a popup on click if it\'s a picture and we know its dimensions.
+@@ -506,6 +510,30 @@ function list_getFiles($start, $items_per_page, $sort, $browse_type)
+ 				'per_page' => $items_per_page,
+ 			)
+ 		);
++    elseif ($browse_type === 'inline'){
++        if ($sort = "m.id_msg")
++            $sort = "id_msg";
++		$request = $smcFunc['db_query']('', '
++			SELECT
++				{string:blank_text} AS id_msg, IFNULL(mem.real_name, {string:not_applicable_text}) AS poster_name,
++				mem.last_login AS poster_time, 0 AS id_topic, a.id_member, a.id_attach, a.filename, a.file_hash, a.attachment_type,
++				a.size, a.width, a.height, a.downloads, {string:blank_text} AS subject, 0 AS id_board
++			FROM {db_prefix}attachments AS a
++				LEFT JOIN {db_prefix}members AS mem ON (mem.id_member = a.id_member)
++			WHERE a.id_member != {int:guest_id} AND a.attachment_type = {int:inline_attachment_type}
++			ORDER BY {raw:sort}
++			LIMIT {int:start}, {int:per_page}',
++			array(
++				'guest_id' => 0,
++				'inline_attachment_type' => 4,
++				'blank_text' => '',
++				'not_applicable_text' => $txt['not_applicable'],
++				'sort' => $sort,
++				'start' => $start,
++				'per_page' => $items_per_page,
++			)
++		);
++    }
+ 	else
+ 		$request = $smcFunc['db_query']('', '
+ 			SELECT
+@@ -720,7 +748,7 @@ function RemoveAttachmentByAge()
+ 	else
+ 	{
+ 		// Remove all the old avatars.
+-		removeAttachments(array('not_id_member' => 0, 'last_login' => (time() - 24 * 60 * 60 * $_POST['age'])), 'members');
++		removeAttachments(array('not_id_member' => 0, 'not_attachment_type' => 4, 'last_login' => (time() - 24 * 60 * 60 * $_POST['age'])), 'members');
+ 	}
+ 	redirectexit('action=admin;area=manageattachments' . (empty($_REQUEST['avatars']) ? ';sa=maintenance' : ';avatars'));
+ }
+@@ -762,7 +790,7 @@ function RemoveAttachment()
+ 		foreach ($_POST['remove'] as $removeID => $dummy)
+ 			$attachments[] = (int) $removeID;
+ 
+-		if ($_REQUEST['type'] == 'avatars' && !empty($attachments))
++		if (($_REQUEST['type'] == 'avatars' || $_REQUEST['type'] == 'inline') && !empty($attachments))
+ 			removeAttachments(array('id_attach' => $attachments));
+ 		else if (!empty($attachments))
+ 		{
+@@ -835,7 +863,7 @@ function removeAttachments($condition, $query_type = '', $return_affected_messag
+ 			if (in_array($type, array('id_member', 'id_attach', 'id_msg')))
+ 				$new_condition[] = 'a.' . $type . ($is_not ? ' NOT' : '') . ' IN (' . (is_array($restriction) ? '{array_int:' . $real_type . '}' : '{int:' . $real_type . '}') . ')';
+ 			elseif ($type == 'attachment_type')
+-				$new_condition[] = 'a.attachment_type = {int:' . $real_type . '}';
++				$new_condition[] = 'a.attachment_type ' . ($is_not ? '<>' : '=') . ' {int:' . $real_type . '}';
+ 			elseif ($type == 'poster_time')
+ 				$new_condition[] = 'm.poster_time < {int:' . $real_type . '}';
+ 			elseif ($type == 'last_login')
+@@ -1832,4 +1860,4 @@ function attachDirStatus($dir, $expected_files)
+ 		return array('ok', false, $dir_size);
+ }
+ 
+-?>
+\ No newline at end of file
++?>
+diff --git a/Sources/Profile-Modify.php b/Sources/Profile-Modify.php
+index 0d08442..8c395fc 100755
+--- a/Sources/Profile-Modify.php
++++ b/Sources/Profile-Modify.php
+@@ -2608,7 +2608,7 @@ function profileSaveAvatarData(&$value)
+ 		$cur_profile['attachment_type'] = 0;
+ 		$cur_profile['filename'] = '';
+ 
+-		removeAttachments(array('id_member' => $memID));
++		removeAttachments(array('id_member' => $memID, 'not_attachment_type' => 4));
+ 	}
+ 	elseif ($value == 'server_stored' && allowedTo('profile_server_avatar'))
+ 	{
+@@ -2621,7 +2621,7 @@ function profileSaveAvatarData(&$value)
+ 		$cur_profile['filename'] = '';
+ 
+ 		// Get rid of their old avatar. (if uploaded.)
+-		removeAttachments(array('id_member' => $memID));
++		removeAttachments(array('id_member' => $memID, 'not_attachment_type' => 4));
+ 	}
+ 	elseif ($value == 'external' && allowedTo('profile_remote_avatar') && (strtolower(substr($_POST['userpicpersonal'], 0, 7)) == 'http://' || strtolower(substr($_POST['userpicpersonal'], 0, 8)) == 'https://') && empty($modSettings['avatar_download_external']))
+ 	{
+@@ -2631,7 +2631,7 @@ function profileSaveAvatarData(&$value)
+ 		$cur_profile['filename'] = '';
+ 
+ 		// Remove any attached avatar...
+-		removeAttachments(array('id_member' => $memID));
++		removeAttachments(array('id_member' => $memID, 'not_attachment_type' => 4));
+ 
+ 		$profile_vars['avatar'] = str_replace('%20', '', preg_replace('~action(?:=|%3d)(?!dlattach)~i', 'action-', $_POST['userpicpersonal']));
+ 		$mime_valid = check_mime_type($profile_vars['avatar'], 'image/', true);
+@@ -2758,7 +2758,7 @@ function profileSaveAvatarData(&$value)
+ 				$file_hash = empty($modSettings['custom_avatar_enabled']) ? getAttachmentFilename($destName, false, null, true) : '';
+ 
+ 				// Remove previous attachments this member might have had.
+-				removeAttachments(array('id_member' => $memID));
++				removeAttachments(array('id_member' => $memID, 'not_attachment_type' => 4));
+ 
+ 				$smcFunc['db_insert']('',
+ 					'{db_prefix}attachments',
+@@ -2781,7 +2781,7 @@ function profileSaveAvatarData(&$value)
+ 				if (!rename($_FILES['attachment']['tmp_name'], $destinationPath))
+ 				{
+ 					// I guess a man can try.
+-					removeAttachments(array('id_member' => $memID));
++					removeAttachments(array('id_member' => $memID, 'not_attachment_type' => 4));
+ 					fatal_lang_error('attach_timeout', 'critical');
+ 				}
+ 
+@@ -3438,4 +3438,4 @@ function groupMembership2($profile_vars, $post_errors, $memID)
+ 	return $changeType;
+ }
+ 
+-?>
+\ No newline at end of file
++?>
+diff --git a/Sources/Subs-Editor.php b/Sources/Subs-Editor.php
+index 2ac59cf..9349534 100755
+--- a/Sources/Subs-Editor.php
++++ b/Sources/Subs-Editor.php
+@@ -1445,7 +1445,9 @@ function create_control_richedit($editorOptions)
+ 				prompt_text_img: \'' . addcslashes($txt['prompt_text_img'], "'") . '\'
+ 			}
+ 		// ]]></script>
+-		<script type="text/javascript" src="' . $settings['default_theme_url'] . '/scripts/editor.js?fin20"></script>';
++		<script type="text/javascript" src="' . $settings['default_theme_url'] . '/scripts/editor.js?fin20"></script>
++        <script type="text/javascript" src="' . $settings['default_theme_url'] . '/scripts/compose-extras.js?fin20"></script>
++		<link rel="stylesheet" type="text/css" href="' . $settings['default_theme_url'] . '/css/awesome-notifications.css" />';
+ 
+ 		$context['show_spellchecking'] = !empty($modSettings['enableSpellChecking']) && function_exists('pspell_new');
+ 		if ($context['show_spellchecking'])
+@@ -2178,4 +2180,4 @@ function td_count__preg_callback($matches)
+ {
+ 	return str_repeat('[td][/td]', $matches[2] - 1) . '[td]';
+ }
+-?>
+\ No newline at end of file
++?>
+diff --git a/Sources/Subs-Graphics.php b/Sources/Subs-Graphics.php
+index cf6fd42..ee0eb96 100755
+--- a/Sources/Subs-Graphics.php
++++ b/Sources/Subs-Graphics.php
+@@ -119,7 +119,7 @@ function downloadAvatar($url, $memID, $max_width, $max_height)
+ 		return false;
+ 
+ 	require_once($sourcedir . '/ManageAttachments.php');
+-	removeAttachments(array('id_member' => $memID));
++	removeAttachments(array('id_member' => $memID, 'not_attachment_type' => 4));
+ 
+ 	$id_folder = !empty($modSettings['currentAttachmentUploadDir']) ? $modSettings['currentAttachmentUploadDir'] : 1;
+ 	$avatar_hash = empty($modSettings['custom_avatar_enabled']) ? getAttachmentFilename($destName, false, null, true) : '';
+@@ -1050,4 +1050,4 @@ function showLetterImage($letter)
+ 	die();
+ }
+ 
+-?>
+\ No newline at end of file
++?>
+diff --git a/Sources/Subs-Members.php b/Sources/Subs-Members.php
+index 3f69711..96b7229 100755
+--- a/Sources/Subs-Members.php
++++ b/Sources/Subs-Members.php
+@@ -387,7 +387,7 @@ function deleteMembers($users, $check_not_admin = false)
+ 
+ 	// Delete avatar.
+ 	require_once($sourcedir . '/ManageAttachments.php');
+-	removeAttachments(array('id_member' => $users));
++	removeAttachments(array('id_member' => $users, 'not_attachment_type' => 4));
+ 
+ 	// It's over, no more moderation for you.
+ 	$smcFunc['db_query']('', '
+@@ -1394,4 +1394,4 @@ function generateValidationCode()
+ 	return substr(preg_replace('/\W/', '', sha1(microtime() . mt_rand() . $dbRand . $modSettings['rand_seed'])), 0, 10);
+ }
+ 
+-?>
+\ No newline at end of file
++?>
+diff --git a/Sources/Subs-Post.php b/Sources/Subs-Post.php
+index 5e4159b..0ec6ce1 100755
+--- a/Sources/Subs-Post.php
++++ b/Sources/Subs-Post.php
+@@ -2226,17 +2226,22 @@ function createAttachment(&$attachmentOptions)
+ 			$attachmentOptions['fileext'] = '';
+ 	}
+ 
++	$attachment_type = !empty($attachmentOptions['attachment_type']) ? $attachmentOptions['attachment_type'] : 0;
++	// weird hack so member ID is set for inline attachments only. smf will interpret /regular/ attachments (i.e. with attachment_type not 4) as avatar attachments when id_member is set.
++	$id_member = !empty($attachmentOptions['poster']) && $attachment_type == 4 ? $attachmentOptions['poster'] : 0;
++
+ 	$smcFunc['db_insert']('',
+ 		'{db_prefix}attachments',
+ 		array(
+ 			'id_folder' => 'int', 'id_msg' => 'int', 'filename' => 'string-255', 'file_hash' => 'string-40', 'fileext' => 'string-8',
+ 			'size' => 'int', 'width' => 'int', 'height' => 'int',
+-			'mime_type' => 'string-20', 'approved' => 'int',
++			'mime_type' => 'string-20', 'approved' => 'int', 'attachment_type' => 'int', 'id_member' => 'int'
+ 		),
+ 		array(
+ 			$id_folder, (int) $attachmentOptions['post'], $attachmentOptions['name'], $attachmentOptions['file_hash'], $attachmentOptions['fileext'],
+ 			(int) $attachmentOptions['size'], (empty($attachmentOptions['width']) ? 0 : (int) $attachmentOptions['width']), (empty($attachmentOptions['height']) ? '0' : (int) $attachmentOptions['height']),
+ 			(!empty($attachmentOptions['mime_type']) ? $attachmentOptions['mime_type'] : ''), (int) $attachmentOptions['approved'],
++			$attachment_type, $id_member
+ 		),
+ 		array('id_attach')
+ 	);
+@@ -3325,4 +3330,4 @@ function time_format__preg_callback($matches)
+ {
+ 	return '[time]' . timeformat($matches[1], false) . '[/time]';
+ }
+-?>
+\ No newline at end of file
++?>
+diff --git a/Sources/UploadAttachment.php b/Sources/UploadAttachment.php
+new file mode 100644
+index 0000000..93b4c32
+--- /dev/null
++++ b/Sources/UploadAttachment.php
+@@ -0,0 +1,71 @@
++<?php
++ini_set('display_errors', 1);
++ini_set('display_startup_errors', 1);
++error_reporting(E_ALL);
++
++/**
++ * Simple Machines Forum (SMF)
++ *
++ * @package SMF
++ * @author viviridian
++ * @copyright 2020 viviridian
++ * @license http://www.simplemachines.org/about/smf/license.php BSD
++ *
++ * @version 2.0.16
++ */
++
++if (!defined('SMF'))
++	die('Hacking attempt...');
++
++/*	Adds a simple api allowing users to post attachments programmatically.
++	I'm using this to enable pasting images into posts.
++ */
++
++function UploadAttachment()
++{
++	global $modSettings, $user_info, $sourcedir;
++
++	if (!allowedTo('post_attachment') && !allowedTo('post_unapproved_attachments')){
++		die(json_encode(array(
++			'ok' => false,
++			'errors' => array("not allowed")
++		)));
++	}
++
++	require_once($sourcedir . '/Subs-Post.php');
++
++	foreach ($_FILES['attachment']['tmp_name'] as $n => $dummy)
++	{
++		if ($_FILES['attachment']['name'][$n] == '')
++			continue;
++
++		$attachmentOptions = array(
++			'post' => 0,
++			'poster' => $user_info['id'],
++			'name' => $_FILES['attachment']['name'][$n],
++			'tmp_name' => $_FILES['attachment']['tmp_name'][$n],
++			'size' => $_FILES['attachment']['size'][$n],
++			'approved' => !$modSettings['postmod_active'] || allowedTo('post_attachment'),
++			'attachment_type' => 4, // to denote inline-uploaded attachments.
++			'skip_thumbnail' => true,
++		);
++
++		if (createAttachment($attachmentOptions))
++		{
++			// build insertion text for the newly uploaded attachment
++			$insert_text = "[img]/index.php?action=dlattach;attach=" . $attachmentOptions['id'] . ";type=inline;hash=" . $attachmentOptions['file_hash'] . "[/img]";
++			die(json_encode(array(
++				'ok' => true,
++				'insert_text' => $insert_text
++			)));
++		}
++		else
++		{
++			die(json_encode(array(
++				'ok' => false,
++				'error' => $attachmentOptions['errors'][0]
++			)));
++		}
++	}
++}
++?>
+diff --git a/Themes/default/ManageAttachments.template.php b/Themes/default/ManageAttachments.template.php
+index 2ed9a67..68006af 100755
+--- a/Themes/default/ManageAttachments.template.php
++++ b/Themes/default/ManageAttachments.template.php
+@@ -47,7 +47,8 @@ function template_browse()
+ 			<div class="content">
+ 				<a href="', $scripturl, '?action=admin;area=manageattachments;sa=browse">', $context['browse_type'] === 'attachments' ? '<img src="' . $settings['images_url'] . '/selected.gif" alt="&gt;" /> ' : '', $txt['attachment_manager_attachments'], '</a> |
+ 				<a href="', $scripturl, '?action=admin;area=manageattachments;sa=browse;avatars">', $context['browse_type'] === 'avatars' ? '<img src="' . $settings['images_url'] . '/selected.gif" alt="&gt;" /> ' : '', $txt['attachment_manager_avatars'], '</a> |
+-				<a href="', $scripturl, '?action=admin;area=manageattachments;sa=browse;thumbs">', $context['browse_type'] === 'thumbs' ? '<img src="' . $settings['images_url'] . '/selected.gif" alt="&gt;" /> ' : '', $txt['attachment_manager_thumbs'], '</a>
++				<a href="', $scripturl, '?action=admin;area=manageattachments;sa=browse;thumbs">', $context['browse_type'] === 'thumbs' ? '<img src="' . $settings['images_url'] . '/selected.gif" alt="&gt;" /> ' : '', $txt['attachment_manager_thumbs'], '</a> |
++				<a href="', $scripturl, '?action=admin;area=manageattachments;sa=browse;inline">', $context['browse_type'] === 'inline' ? '<img src="' . $settings['images_url'] . '/selected.gif" alt="&gt;" /> ' : '', 'Inline</a>
+ 			</div>
+ 			<span class="botslice"><span></span></span>
+ 		</div>
+@@ -212,4 +213,4 @@ function template_attachment_paths()
+ 	template_show_list('attach_paths');
+ }
+ 
+-?>
+\ No newline at end of file
++?>
+diff --git a/index.php b/index.php
+index 6d6c8d2..dbdd882 100755
+--- a/index.php
++++ b/index.php
+@@ -350,6 +350,7 @@ function smf_main()
+ 		'about:unknown' => array('Karma.php', 'BookOfUnknown'),
+ 		'unread' => array('Recent.php', 'UnreadTopics'),
+ 		'unreadreplies' => array('Recent.php', 'UnreadTopics'),
++		'uploadattachment' => array('UploadAttachment.php', 'UploadAttachment'),
+ 		'verificationcode' => array('Register.php', 'VerificationCode'),
+ 		'viewprofile' => array('Profile.php', 'ModifyProfile'),
+ 		'vote' => array('Poll.php', 'Vote'),
+@@ -383,4 +384,4 @@ function smf_main()
+ 	return $actionArray[$_REQUEST['action']][1];
+ }
+ 
+-?>
+\ No newline at end of file
++?>
