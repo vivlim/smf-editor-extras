@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "rimraf ./build && webpack --mode=development && cp ./node_modules/awesome-notifications/dist/style.css ./build/awesome-notifications.css",
-    "devdeploy": "npm run build && cp ./build/bundle.js ~/git/smfdev/web/data/Themes/default/scripts/compose-extras.js && cp ./build/awesome-notifications.css ~/git/smfdev/web/data/Themes/default/css/awesome-notifications.css"
+    "devdeploy": "npm run build && cp ./build/bundle.js ~/git/smfdev/web/data/Themes/default/scripts/compose-extras.js && cp ./build/awesome-notifications.css ~/git/smfdev/web/data/Themes/default/css/awesome-notifications.css",
+    "dist": "rimraf ./dist && mkdir -p ./dist/Themes/default/scripts && mkdir -p ./dist/Themes/default/css && cp ./build/bundle.js ./dist/Themes/default/scripts/compose-extras.js && cp ./build/awesome-notifications.css ./dist/Themes/default/css/awesome-notifications.css && cp ./mod.patch ./dist/ && cp ./package-readme.md ./dist/readme.md && cd dist && zip ./smf-paste-img.zip * -r"
   },
   "author": "viviridian",
   "license": "UNLICENSED",
