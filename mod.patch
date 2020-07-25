@@ -361,15 +361,11 @@ index 5e4159b..0ec6ce1 100755
 +?>
 diff --git a/Sources/UploadAttachment.php b/Sources/UploadAttachment.php
 new file mode 100644
-index 0000000..93b4c32
+index 0000000..a84bf88
 --- /dev/null
 +++ b/Sources/UploadAttachment.php
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,67 @@
 +<?php
-+ini_set('display_errors', 1);
-+ini_set('display_startup_errors', 1);
-+error_reporting(E_ALL);
-+
 +/**
 + * Simple Machines Forum (SMF)
 + *
